@@ -4,6 +4,8 @@ final class ViewController: UIViewController {
 
     private let pink = UIColor(red: 0.98, green: 0.18, blue: 0.33, alpha: 1)
     private let engine = DownloadEngine()
+    private let applePlayer = AppleMusicPlayer()
+    private let applePlayButton = UIButton(type: .system)
     private let titleLabel = UILabel()
     private let field = UITextField()
     private let pasteButton = UIButton(type: .system)
@@ -25,7 +27,7 @@ final class ViewController: UIViewController {
         titleLabel.font = .systemFont(ofSize: 34, weight: .heavy)
         titleLabel.textColor = .label
 
-        field.placeholder = "Direct audio URL ya Apple Music link"
+        field.placeholder = "Direct audio URL ya Apple Music song link"
         field.keyboardType = .URL
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
@@ -37,6 +39,10 @@ final class ViewController: UIViewController {
         field.layer.cornerRadius = 12
         field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
         field.leftViewMode = .always
+
+        applePlayButton.setTitle("Play full song with Apple Music", for: .normal)
+        applePlayButton.tintColor = pink
+        applePlayButton.addTarget(self, action: #selector(playAppleMusicTapped), for: .touchUpInside)
 
         pasteButton.setTitle("Paste link", for: .normal)
         pasteButton.tintColor = pink
@@ -66,7 +72,7 @@ final class ViewController: UIViewController {
         logView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         logView.text = "Status: idle\n"
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, field, pasteButton, button, progress, sizeLabel, logView])
+        let stack = UIStackView(arrangedSubviews: [titleLabel, field, pasteButton, button, applePlayButton, progress, sizeLabel, logView])
         stack.axis = .vertical; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
@@ -103,6 +109,29 @@ final class ViewController: UIViewController {
 
     @objc private func pasteTapped() {
         if let s = UIPasteboard.general.string { field.text = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+
+    @objc private func playAppleMusicTapped() {
+        view.endEditing(true)
+        let raw = (field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: raw),
+              let host = url.host?.lowercased(),
+              host.hasSuffix("music.apple.com") || host.hasSuffix("itunes.apple.com") else {
+            append("Apple Music song link paste karo.")
+            return
+        }
+        applePlayButton.isEnabled = false
+        append("Apple Music authorization aur full track load ho raha hai…")
+        Task { @MainActor in
+            defer { applePlayButton.isEnabled = true }
+            do {
+                let message = try await applePlayer.playAppleMusicLink(url)
+                append(message)
+            } catch {
+                append("Apple Music error: \(error.localizedDescription)")
+            }
+        }
     }
 
     @objc private func tapped() {
