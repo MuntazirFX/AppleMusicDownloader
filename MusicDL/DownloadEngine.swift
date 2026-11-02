@@ -60,8 +60,8 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
     private static func appleID(from url: URL) -> String? {
         if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
            let i = comps.queryItems?.first(where: { $0.name == "i" })?.value,
-           i.allSatisfy(\.isNumber) { return i }
-        if let last = url.pathComponents.last, !last.isEmpty, last.allSatisfy(\.isNumber) { return last }
+           !i.isEmpty, i.allSatisfy({ $0.isNumber }) { return i }
+        if let last = url.pathComponents.last, !last.isEmpty, last.allSatisfy({ $0.isNumber }) { return last }
         return nil
     }
 
@@ -69,7 +69,10 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
         guard let id = DownloadEngine.appleID(from: url) else {
             return fail("Apple Music link se track ID nahi mili. Share Song se link copy karo.")
         }
-        let urlCountry = url.pathComponents.dropFirst().first.flatMap { $0.count == 2 ? $0 : nil } ?? "us"
+        var urlCountry = "us"
+        if url.pathComponents.count > 1, url.pathComponents[1].count == 2 {
+            urlCountry = url.pathComponents[1]
+        }
         let cc = country ?? urlCountry
         log("Apple Music link mila. iTunes API se preview dhoondh raha hu (\(cc))...")
         var c = URLComponents(string: "https://itunes.apple.com/lookup")!
@@ -81,12 +84,19 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
                 guard let self, !self.finished else { return }
                 if let error {
                     if (error as NSError).code == NSURLErrorCancelled {
-                        self.finished = true; self.log("Cancelled")
-                        return self.onFinish?(.failure(error))
+                        self.finished = true
+                        self.log("Cancelled")
+                        self.onFinish?(.failure(error))
+                        return
                     }
                     return self.fail("Lookup error: \(error.localizedDescription)")
                 }
-                let results = (try? JSONSerialization.jsonObject(with: data ?? Data()) as? [String: Any])?["results"] as? [[String: Any]] ?? []
+                var results: [[String: Any]] = []
+                if let d = data,
+                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                   let arr = obj["results"] as? [[String: Any]] {
+                    results = arr
+                }
                 guard let track = results.first(where: { ($0["previewUrl"] as? String) != nil }),
                       let prev = track["previewUrl"] as? String, let pURL = URL(string: prev) else {
                     if cc != "us" { return self.resolveApple(url: url, country: "us") }
