@@ -18,6 +18,3 @@ targets:
         INFOPLIST_FILE: MusicDL/Info.plist
         CODE_SIGNING_ALLOWED: NO
         SWIFT_VERSION: "5.0"
-    dependencies:
-      - sdk: WebKit.framework
-      - sdk: AVFoundation.framework
