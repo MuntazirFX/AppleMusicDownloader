@@ -16,6 +16,4 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.MusicDL
         INFOPLIST_FILE: MusicDL/Info.plist
-        CODE_SIGNING_ALLOWED: NO
-        CODE_SIGN_ENTITLEMENTS: MusicDL/MusicDL.entitlements
         SWIFT_VERSION: "5.0"
