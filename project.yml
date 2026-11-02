@@ -9,12 +9,13 @@ targets:
     platform: iOS
     sources:
       - path: MusicDL
-        excludes: ["Info.plist"]
+        excludes:
+          - "Info.plist"
+          - "Assets.xcassets"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.MusicDL
         INFOPLIST_FILE: MusicDL/Info.plist
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGNING_ALLOWED: NO
         SWIFT_VERSION: "5.0"
     dependencies:
