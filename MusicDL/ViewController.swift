@@ -40,7 +40,7 @@ final class ViewController: UIViewController {
         field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
         field.leftViewMode = .always
 
-        applePlayButton.setTitle("Play full song with Apple Music", for: .normal)
+        applePlayButton.setTitle("Open link in Apple Music", for: .normal)
         applePlayButton.tintColor = pink
         applePlayButton.addTarget(self, action: #selector(playAppleMusicTapped), for: .touchUpInside)
 
@@ -50,7 +50,7 @@ final class ViewController: UIViewController {
         pasteButton.addTarget(self, action: #selector(pasteTapped), for: .touchUpInside)
 
         var cfg = UIButton.Configuration.filled()
-        cfg.title = "Download"
+        cfg.title = "Play / Download"
         cfg.baseBackgroundColor = pink
         cfg.baseForegroundColor = .white
         cfg.cornerStyle = .capsule
@@ -103,7 +103,7 @@ final class ViewController: UIViewController {
     private func setRunning(_ r: Bool) {
         running = r
         var c = button.configuration
-        c?.title = r ? "Cancel" : "Download"
+        c?.title = r ? "Cancel" : "Play / Download"
         button.configuration = c
     }
 
@@ -117,20 +117,12 @@ final class ViewController: UIViewController {
         let raw = (field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: raw),
               let host = url.host?.lowercased(),
-              host.hasSuffix("music.apple.com") || host.hasSuffix("itunes.apple.com") else {
-            append("Apple Music song link paste karo.")
+              host == "music.apple.com" || host.hasSuffix(".music.apple.com") || host == "itunes.apple.com" || host.hasSuffix(".itunes.apple.com") else {
+            append("Apple Music song ya album link paste karo.")
             return
         }
-        applePlayButton.isEnabled = false
-        append("Apple Music authorization aur full track load ho raha hai…")
-        Task { @MainActor in
-            defer { applePlayButton.isEnabled = true }
-            do {
-                let message = try await applePlayer.playAppleMusicLink(url)
-                append(message)
-            } catch {
-                append("Apple Music error: \(error.localizedDescription)")
-            }
+        UIApplication.shared.open(url, options: [:]) { [weak self] success in
+            self?.append(success ? "Apple Music app/browser open ho gaya." : "Apple Music link open nahi ho saka.")
         }
     }
 
@@ -141,6 +133,23 @@ final class ViewController: UIViewController {
         guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
               ["http", "https"].contains(scheme), url.host != nil else {
             append("Valid http/https URL daalo.")
+            return
+        }
+        let host = (url.host ?? "").lowercased()
+        if host == "music.apple.com" || host.hasSuffix(".music.apple.com") || host == "itunes.apple.com" || host.hasSuffix(".itunes.apple.com") {
+            logView.text = ""
+            append("Apple Music link detected. Full catalog playback start ho raha hai…")
+            applePlayButton.isEnabled = false
+            Task { @MainActor in
+                defer { self.applePlayButton.isEnabled = true }
+                do {
+                    let message = try await self.applePlayer.playAppleMusicLink(url)
+                    self.append(message)
+                    self.append("Note: Apple Music protected audio ko MP3/M4A file ke roop mein export nahi kiya ja sakta.")
+                } catch {
+                    self.append("Apple Music error: \(error.localizedDescription)")
+                }
+            }
             return
         }
         logView.text = ""
