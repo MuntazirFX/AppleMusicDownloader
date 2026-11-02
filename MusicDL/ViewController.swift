@@ -147,7 +147,7 @@ final class ViewController: UIViewController {
                     self.append(message)
                     self.append("Note: Apple Music protected audio ko MP3/M4A file ke roop mein export nahi kiya ja sakta.")
                 } catch {
-                    self.let nsError = error as NSError
+                    let nsError = error as NSError
                     if nsError.localizedDescription.localizedCaseInsensitiveContains("developer token") || nsError.localizedDescription.localizedCaseInsensitiveContains("token") {
                         self.append("MusicKit token setup failed. Check: MusicKit enabled for this exact Bundle ID in Apple Developer, same Team ID used for signing, and install a properly signed IPA (unsigned IPA cannot use MusicKit automatic token generation).")
                         self.append("Technical error: \(nsError.domain) (\(nsError.code)) — \(nsError.localizedDescription)")
