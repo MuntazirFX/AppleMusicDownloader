@@ -27,7 +27,7 @@ final class ViewController: UIViewController {
         titleLabel.font = .systemFont(ofSize: 34, weight: .heavy)
         titleLabel.textColor = .label
 
-        field.placeholder = "Direct audio URL ya Apple Music song link"
+        field.placeholder = "Apple Music song/album link ya direct audio URL"
         field.keyboardType = .URL
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
@@ -50,7 +50,7 @@ final class ViewController: UIViewController {
         pasteButton.addTarget(self, action: #selector(pasteTapped), for: .touchUpInside)
 
         var cfg = UIButton.Configuration.filled()
-        cfg.title = "Play / Download"
+        cfg.title = "Play Apple Music / Download Audio"
         cfg.baseBackgroundColor = pink
         cfg.baseForegroundColor = .white
         cfg.cornerStyle = .capsule
@@ -103,7 +103,7 @@ final class ViewController: UIViewController {
     private func setRunning(_ r: Bool) {
         running = r
         var c = button.configuration
-        c?.title = r ? "Cancel" : "Play / Download"
+        c?.title = r ? "Cancel" : "Play Apple Music / Download Audio"
         button.configuration = c
     }
 
@@ -147,7 +147,13 @@ final class ViewController: UIViewController {
                     self.append(message)
                     self.append("Note: Apple Music protected audio ko MP3/M4A file ke roop mein export nahi kiya ja sakta.")
                 } catch {
-                    self.append("Apple Music error: \(error.localizedDescription)")
+                    self.let nsError = error as NSError
+                    if nsError.localizedDescription.localizedCaseInsensitiveContains("developer token") || nsError.localizedDescription.localizedCaseInsensitiveContains("token") {
+                        self.append("MusicKit token setup failed. Check: MusicKit enabled for this exact Bundle ID in Apple Developer, same Team ID used for signing, and install a properly signed IPA (unsigned IPA cannot use MusicKit automatic token generation).")
+                        self.append("Technical error: \(nsError.domain) (\(nsError.code)) — \(nsError.localizedDescription)")
+                    } else {
+                        self.append("Apple Music error: \(nsError.localizedDescription)")
+                    }
                 }
             }
             return
