@@ -1,0 +1,23 @@
+name: Build IPA
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Compile and Package IPA
+        run: |
+          mkdir -p build/Payload
+          xcrun -sdk iphoneos swiftc AppDelegate.swift ViewController.swift -o build/Payload/MusicDownloader -target arm64-apple-ios15.0
+          cp Info.plist build/Payload/
+          cd build
+          zip -r MusicDownloader.ipa Payload
+          
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicDownloader-IPA
+          path: build/MusicDownloader.ipa
