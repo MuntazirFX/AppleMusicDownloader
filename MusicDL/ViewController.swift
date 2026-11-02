@@ -25,7 +25,7 @@ final class ViewController: UIViewController {
         titleLabel.font = .systemFont(ofSize: 34, weight: .heavy)
         titleLabel.textColor = .label
 
-        field.placeholder = "Direct audio file URL (https://...)"
+        field.placeholder = "Direct audio URL ya Apple Music link"
         field.keyboardType = .URL
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
