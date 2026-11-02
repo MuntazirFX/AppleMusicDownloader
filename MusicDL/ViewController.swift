@@ -1,17 +1,17 @@
 import UIKit
-import WebKit
 
 final class ViewController: UIViewController {
 
+    private let pink = UIColor(red: 0.98, green: 0.18, blue: 0.33, alpha: 1)
     private let engine = DownloadEngine()
     private let titleLabel = UILabel()
     private let field = UITextField()
+    private let pasteButton = UIButton(type: .system)
     private let button = UIButton(type: .system)
     private let progress = UIProgressView(progressViewStyle: .bar)
-    private let logLabel = UILabel()
-    private let logBox = UIView()
-    private var logText = ""
-    private let webView = WKWebView(frame: .zero) // placeholder for future extractor sub-system
+    private let sizeLabel = UILabel()
+    private let logView = UITextView()
+    private var running = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,36 +25,50 @@ final class ViewController: UIViewController {
         titleLabel.font = .systemFont(ofSize: 34, weight: .heavy)
         titleLabel.textColor = .label
 
-        field.placeholder = "Track title"
+        field.placeholder = "Direct audio file URL (https://...)"
+        field.keyboardType = .URL
+        field.autocapitalizationType = .none
+        field.autocorrectionType = .no
+        field.clearButtonMode = .whileEditing
+        field.returnKeyType = .go
+        field.addTarget(self, action: #selector(tapped), for: .editingDidEndOnExit)
         field.backgroundColor = .secondarySystemBackground
         field.textColor = .label
         field.layer.cornerRadius = 12
         field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
         field.leftViewMode = .always
 
+        pasteButton.setTitle("Paste link", for: .normal)
+        pasteButton.tintColor = pink
+        pasteButton.contentHorizontalAlignment = .leading
+        pasteButton.addTarget(self, action: #selector(pasteTapped), for: .touchUpInside)
+
         var cfg = UIButton.Configuration.filled()
         cfg.title = "Download"
-        cfg.baseBackgroundColor = UIColor(red: 0.98, green: 0.18, blue: 0.33, alpha: 1)
+        cfg.baseBackgroundColor = pink
         cfg.baseForegroundColor = .white
         cfg.cornerStyle = .capsule
         button.configuration = cfg
         button.addTarget(self, action: #selector(tapped), for: .touchUpInside)
 
-        progress.progressTintColor = UIColor(red: 0.98, green: 0.18, blue: 0.33, alpha: 1)
+        progress.progressTintColor = pink
         progress.trackTintColor = .tertiarySystemFill
 
-        logBox.backgroundColor = .secondarySystemBackground
-        logBox.layer.cornerRadius = 12
-        logLabel.numberOfLines = 0
-        logLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        logLabel.textColor = .secondaryLabel
-        logLabel.text = "Status: idle"
+        sizeLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        sizeLabel.textColor = .secondaryLabel
+        sizeLabel.text = " "
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, field, button, progress, logBox])
-        stack.axis = .vertical; stack.spacing = 18
+        logView.isEditable = false
+        logView.backgroundColor = .secondarySystemBackground
+        logView.textColor = .secondaryLabel
+        logView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        logView.layer.cornerRadius = 12
+        logView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        logView.text = "Status: idle\n"
+
+        let stack = UIStackView(arrangedSubviews: [titleLabel, field, pasteButton, button, progress, sizeLabel, logView])
+        stack.axis = .vertical; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
-        logLabel.translatesAutoresizingMaskIntoConstraints = false
-        logBox.addSubview(logLabel)
         view.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
@@ -62,31 +76,47 @@ final class ViewController: UIViewController {
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
             field.heightAnchor.constraint(equalToConstant: 48),
             button.heightAnchor.constraint(equalToConstant: 52),
-            logBox.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            logLabel.topAnchor.constraint(equalTo: logBox.topAnchor, constant: 12),
-            logLabel.bottomAnchor.constraint(lessThanOrEqualTo: logBox.bottomAnchor, constant: -12),
-            logLabel.leadingAnchor.constraint(equalTo: logBox.leadingAnchor, constant: 12),
-            logLabel.trailingAnchor.constraint(equalTo: logBox.trailingAnchor, constant: -12),
+            logView.heightAnchor.constraint(equalToConstant: 260),
         ])
     }
 
     private func bindEngine() {
-        engine.onLog = { [weak self] m in
-            guard let self else { return }
-            self.logText += "• \(m)\n"; self.logLabel.text = self.logText
+        engine.onLog = { [weak self] m in self?.append(m) }
+        engine.onProgress = { [weak self] p, text in
+            self?.progress.setProgress(p, animated: true)
+            self?.sizeLabel.text = text.isEmpty ? " " : text
         }
-        engine.onProgress = { [weak self] p in self?.progress.setProgress(p, animated: true) }
-        engine.onFinish = { [weak self] r in
-            guard let self else { return }
-            self.button.isEnabled = true
-            if case .failure(let e) = r { self.engine.onLog?("Error: \(e.localizedDescription)") }
-        }
+        engine.onFinish = { [weak self] _ in self?.setRunning(false) }
+    }
+
+    private func append(_ m: String) {
+        logView.text += "• \(m)\n"
+        logView.scrollRangeToVisible(NSRange(location: logView.text.count - 1, length: 1))
+    }
+
+    private func setRunning(_ r: Bool) {
+        running = r
+        var c = button.configuration
+        c?.title = r ? "Cancel" : "Download"
+        button.configuration = c
+    }
+
+    @objc private func pasteTapped() {
+        if let s = UIPasteboard.general.string { field.text = s.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     @objc private func tapped() {
+        if running { engine.cancel(); return }
         view.endEditing(true)
-        button.isEnabled = false
-        logText = ""; logLabel.text = ""
-        engine.start(title: field.text ?? "")
+        let raw = (field.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme), url.host != nil else {
+            append("Valid http/https URL daalo.")
+            return
+        }
+        logView.text = ""
+        progress.setProgress(0, animated: false)
+        setRunning(true)
+        engine.start(url: url)
     }
 }

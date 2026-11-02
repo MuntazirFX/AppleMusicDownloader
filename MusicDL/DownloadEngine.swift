@@ -1,97 +1,111 @@
 import Foundation
-import AVFoundation
 
-/// SIMULATED pipeline: manifest parse -> handshake -> download -> save .m4a.
-/// No real streaming service, DRM or decryption is involved.
+/// Real downloader: kisi bhi direct (DRM-free) file URL ko download karke
+/// app ke Documents folder mein save karta hai (Files app > On My iPhone > MusicDL).
 final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
 
     var onLog: ((String) -> Void)?
-    var onProgress: ((Float) -> Void)?
+    var onProgress: ((Float, String) -> Void)?
     var onFinish: ((Result<URL, Error>) -> Void)?
 
-    private lazy var session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
-    private var downloaded: URL?
-    private var timer: Timer?
-    private var shown: Float = 0
-    private var real: Float = 0
-    private var finishedReal = false
-    private var title = "Demo Track"
+    private lazy var session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 30
+        return URLSession(configuration: cfg, delegate: self, delegateQueue: .main)
+    }()
+    private var task: URLSessionDownloadTask?
+    private var sourceURL: URL?
+    private var finished = false
 
-    func start(title: String) {
-        self.title = title.isEmpty ? "Demo Track" : title
-        shown = 0; real = 0; finishedReal = false; downloaded = nil
-        onProgress?(0)
-        log("Manifest fetch kar raha hu (simulated)...")
-        after(0.8) { [self] in
-            log("Manifest parsed: AAC 256kbps, 12 segments")
-            log("Handshake shuru (simulated)...")
-            after(1.0) { [self] in
-                log("Handshake OK (mock key)")
-                beginDownload()
-            }
-        }
+    private static let mimeExt: [String: String] = [
+        "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac",
+        "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav",
+        "audio/x-wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg"
+    ]
+
+    func start(url: URL) {
+        finished = false
+        sourceURL = url
+        onProgress?(0, "")
+        log("Connecting: \(url.host ?? url.absoluteString)")
+        task = session.downloadTask(with: url)
+        task?.resume()
     }
 
-    private func beginDownload() {
-        do {
-            let payload = FileManager.default.temporaryDirectory.appendingPathComponent("payload.bin")
-            try Data(count: 6 * 1024 * 1024).write(to: payload)
-            log("Download shuru...")
-            session.downloadTask(with: payload).resume()
-            timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
-        } catch { onFinish?(.failure(error)) }
-    }
-
-    /// Smooth fake pacing: progress eases up over ~4s, never passes real progress.
-    private func tick() {
-        guard finishedReal else { return }
-        shown = min(1, shown + 0.0125)
-        onProgress?(shown)
-        if shown >= 1 { timer?.invalidate(); finish() }
-    }
-
-    private func finish() {
-        log("Decrypt (mock) + mux ho raha hai...")
-        do {
-            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let safe = title.replacingOccurrences(of: "/", with: "-")
-            let out = docs.appendingPathComponent("\(safe).m4a")
-            try? FileManager.default.removeItem(at: out)
-            try writeSilentM4A(to: out, seconds: 5)
-            log("Saved: \(out.lastPathComponent) (Files app > MusicDL)")
-            onFinish?(.success(out))
-        } catch { onFinish?(.failure(error)) }
-    }
-
-    private func writeSilentM4A(to url: URL, seconds: Int) throws {
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128000]
-        let file = try AVAudioFile(forWriting: url, settings: settings)
-        let fmt = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
-        let frames = AVAudioFrameCount(44100)
-        let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames)!
-        buf.frameLength = frames // zeroed = silence
-        for _ in 0..<seconds { try file.write(from: buf) }
+    func cancel() {
+        task?.cancel()
     }
 
     // MARK: URLSessionDownloadDelegate
     func urlSession(_ s: URLSession, downloadTask t: URLSessionDownloadTask, didWriteData b: Int64,
                     totalBytesWritten w: Int64, totalBytesExpectedToWrite e: Int64) {
-        if e > 0 { real = Float(w) / Float(e) }
+        let mb = { (x: Int64) in String(format: "%.1f MB", Double(x) / 1_048_576) }
+        if e > 0 {
+            onProgress?(Float(w) / Float(e), "\(mb(w)) / \(mb(e))")
+        } else {
+            onProgress?(0, "\(mb(w)) (size unknown)")
+        }
     }
 
     func urlSession(_ s: URLSession, downloadTask t: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        downloaded = location
-        finishedReal = true
+        // temp file is deleted after this method returns, so move it right now.
+        if let http = t.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            return fail("Server ne HTTP \(http.statusCode) diya. Link check karo.")
+        }
+        if let mime = t.response?.mimeType, mime.hasPrefix("text/") {
+            return fail("Ye direct file nahi, webpage hai (\(mime)). Direct audio file ka link do.")
+        }
+        do {
+            let dest = destination(for: t.response, original: sourceURL!)
+            try FileManager.default.moveItem(at: location, to: dest)
+            finished = true
+            onProgress?(1, "")
+            log("Saved: \(dest.lastPathComponent)")
+            log("Files app > On My iPhone > MusicDL")
+            onFinish?(.success(dest))
+        } catch {
+            fail("Save fail: \(error.localizedDescription)")
+        }
     }
 
     func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { timer?.invalidate(); onFinish?(.failure(error)) }
+        guard let error, !finished else { return }
+        finished = true
+        if (error as NSError).code == NSURLErrorCancelled {
+            log("Cancelled")
+        } else {
+            log("Error: \(error.localizedDescription)")
+        }
+        onFinish?(.failure(error))
+    }
+
+    // MARK: Helpers
+    private func fail(_ msg: String) {
+        finished = true
+        log(msg)
+        onFinish?(.failure(NSError(domain: "MusicDL", code: 1, userInfo: [NSLocalizedDescriptionKey: msg])))
+    }
+
+    private func destination(for response: URLResponse?, original: URL) -> URL {
+        var name = response?.suggestedFilename ?? original.lastPathComponent
+        name = name.removingPercentEncoding ?? name
+        name = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        if name.isEmpty { name = "download" }
+        if (name as NSString).pathExtension.isEmpty,
+           let mime = response?.mimeType, let ext = DownloadEngine.mimeExt[mime] {
+            name += "." + ext
+        }
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let base = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        var dest = docs.appendingPathComponent(name)
+        var i = 1
+        while FileManager.default.fileExists(atPath: dest.path) {
+            dest = docs.appendingPathComponent("\(base) (\(i))" + (ext.isEmpty ? "" : "." + ext))
+            i += 1
+        }
+        return dest
     }
 
     private func log(_ m: String) { onLog?(m) }
-    private func after(_ t: TimeInterval, _ b: @escaping () -> Void) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: b)
-    }
 }
