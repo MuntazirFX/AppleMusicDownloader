@@ -1,4 +1,4 @@
-name: Build IPA
+name: Build Heavy Premium IPA
 on: [push, workflow_dispatch]
 
 jobs:
@@ -8,16 +8,29 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Compile and Package IPA
+      - name: Compile and Inject Frameworks
         run: |
-          mkdir -p build/Payload
-          xcrun -sdk iphoneos swiftc AppDelegate.swift ViewController.swift -o build/Payload/MusicDownloader -target arm64-apple-ios15.0
-          cp Info.plist build/Payload/
-          cd build
-          zip -r MusicDownloader.ipa Payload
+          # 1. Structure directory setup
+          mkdir -p build/Payload/MusicDownloader.app/Frameworks
           
-      - name: Upload IPA Artifact
+          # 2. Main app binary compiler execution
+          xcrun -sdk iphoneos swiftc AppDelegate.swift ViewController.swift -o build/Payload/MusicDownloader.app/MusicDownloader -target arm64-apple-ios15.0
+          
+          # 3. Injecting plist data metadata
+          cp Info.plist build/Payload/MusicDownloader.app/
+          
+          # 4. Moving dynamic libraries (.dylib/frameworks) into the bundle
+          # Ensure you have uploaded your .dylib files inside a 'Frameworks' folder in your repository
+          if [ -d "Frameworks" ]; then
+            cp -R Frameworks/* build/Payload/MusicDownloader.app/Frameworks/
+          fi
+          
+          # 5. Final bundling compression
+          cd build
+          zip -r MusicDownloader_Full.ipa Payload
+          
+      - name: Upload Complete IPA
         uses: actions/upload-artifact@v4
         with:
-          name: MusicDownloader-IPA
-          path: build/MusicDownloader.ipa
+          name: MusicDownloader-Full-IPA
+          path: build/MusicDownloader_Full.ipa
