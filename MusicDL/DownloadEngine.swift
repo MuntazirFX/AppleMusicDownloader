@@ -2,6 +2,7 @@ import Foundation
 
 /// Real downloader: kisi bhi direct (DRM-free) file URL ko download karke
 /// app ke Documents folder mein save karta hai (Files app > On My iPhone > MusicDL).
+/// Apple Music / iTunes link dene pe Apple ki official iTunes API se 30-second preview clip download hota hai.
 final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
 
     var onLog: ((String) -> Void)?
@@ -16,6 +17,8 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
     private var task: URLSessionDownloadTask?
     private var sourceURL: URL?
     private var finished = false
+    private var preferredName: String?
+    private var lookupTask: URLSessionDataTask?
 
     private static let mimeExt: [String: String] = [
         "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac",
@@ -25,15 +28,79 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
 
     func start(url: URL) {
         finished = false
-        sourceURL = url
+        preferredName = nil
+        task = nil
+        lookupTask = nil
         onProgress?(0, "")
+        let host = (url.host ?? "").lowercased()
+        if host.hasSuffix("music.apple.com") || host.hasSuffix("itunes.apple.com") {
+            resolveApple(url: url, country: nil)
+        } else {
+            beginDownload(url)
+        }
+    }
+
+    func cancel() {
+        lookupTask?.cancel()
+        if let t = task { t.cancel() } else if !finished {
+            finished = true
+            log("Cancelled")
+            onFinish?(.failure(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)))
+        }
+    }
+
+    private func beginDownload(_ url: URL) {
+        sourceURL = url
         log("Connecting: \(url.host ?? url.absoluteString)")
         task = session.downloadTask(with: url)
         task?.resume()
     }
 
-    func cancel() {
-        task?.cancel()
+    // MARK: Apple Music link -> official 30s preview
+    private static func appleID(from url: URL) -> String? {
+        if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let i = comps.queryItems?.first(where: { $0.name == "i" })?.value,
+           i.allSatisfy(\.isNumber) { return i }
+        if let last = url.pathComponents.last, !last.isEmpty, last.allSatisfy(\.isNumber) { return last }
+        return nil
+    }
+
+    private func resolveApple(url: URL, country: String?) {
+        guard let id = DownloadEngine.appleID(from: url) else {
+            return fail("Apple Music link se track ID nahi mili. Share Song se link copy karo.")
+        }
+        let urlCountry = url.pathComponents.dropFirst().first.flatMap { $0.count == 2 ? $0 : nil } ?? "us"
+        let cc = country ?? urlCountry
+        log("Apple Music link mila. iTunes API se preview dhoondh raha hu (\(cc))...")
+        var c = URLComponents(string: "https://itunes.apple.com/lookup")!
+        c.queryItems = [URLQueryItem(name: "id", value: id),
+                        URLQueryItem(name: "country", value: cc),
+                        URLQueryItem(name: "entity", value: "song")]
+        lookupTask = URLSession.shared.dataTask(with: c.url!) { [weak self] data, _, error in
+            DispatchQueue.main.async {
+                guard let self, !self.finished else { return }
+                if let error {
+                    if (error as NSError).code == NSURLErrorCancelled {
+                        self.finished = true; self.log("Cancelled")
+                        return self.onFinish?(.failure(error))
+                    }
+                    return self.fail("Lookup error: \(error.localizedDescription)")
+                }
+                let results = (try? JSONSerialization.jsonObject(with: data ?? Data()) as? [String: Any])?["results"] as? [[String: Any]] ?? []
+                guard let track = results.first(where: { ($0["previewUrl"] as? String) != nil }),
+                      let prev = track["previewUrl"] as? String, let pURL = URL(string: prev) else {
+                    if cc != "us" { return self.resolveApple(url: url, country: "us") }
+                    return self.fail("Is link ka preview nahi mila.")
+                }
+                let name = track["trackName"] as? String ?? "Track"
+                let artist = track["artistName"] as? String ?? ""
+                self.log("Mila: \(artist) - \(name)")
+                self.log("Note: Apple sirf 30 sec ka preview deta hai.")
+                self.preferredName = (artist.isEmpty ? name : "\(artist) - \(name)") + " (preview).m4a"
+                self.beginDownload(pURL)
+            }
+        }
+        lookupTask?.resume()
     }
 
     // MARK: URLSessionDownloadDelegate
@@ -87,7 +154,7 @@ final class DownloadEngine: NSObject, URLSessionDownloadDelegate {
     }
 
     private func destination(for response: URLResponse?, original: URL) -> URL {
-        var name = response?.suggestedFilename ?? original.lastPathComponent
+        var name = preferredName ?? response?.suggestedFilename ?? original.lastPathComponent
         name = name.removingPercentEncoding ?? name
         name = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         if name.isEmpty { name = "download" }
